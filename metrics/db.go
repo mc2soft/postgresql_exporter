@@ -3,7 +3,6 @@ package metrics
 import (
 	"database/sql"
 	"errors"
-	"strings"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -63,32 +62,9 @@ func (d *DBMetrics) Scrape(db *sql.DB) error {
 	}
 	d.metrics["db_size"].Set(*size)
 
-	var keys []string
-	for key := range dbMetrics {
-		keys = append(keys, key)
-	}
-
-	vals := make([]interface{}, len(keys))
-	for i := range keys {
-		vals[i] = new(float64)
-	}
-	err = db.QueryRow("SELECT "+strings.Join(keys, ",")+" FROM pg_stat_database WHERE datname = $1", d.name).Scan(vals...)
+	err = getMetrics(db, d.metrics, dbMetrics, "database_"+d.name, "pg_stat_database WHERE datname = $1", []interface{}{d.name})
 	if err != nil {
 		return errors.New("error running database stats query on database: " + err.Error())
-	}
-
-	for i, val := range vals {
-		key := keys[i]
-		if _, ok := d.metrics[key]; !ok {
-			d.metrics[key] = prometheus.NewGauge(prometheus.GaugeOpts{
-				Namespace: namespace,
-				Subsystem: "database_" + d.name,
-				Name:      key,
-				Help:      dbMetrics[key],
-			})
-		}
-
-		d.metrics[key].Set(*val.(*float64))
 	}
 
 	cacheRatio := new(float64)

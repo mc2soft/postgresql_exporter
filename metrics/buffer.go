@@ -2,8 +2,6 @@ package metrics
 
 import (
 	"database/sql"
-	"errors"
-	"strings"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -35,35 +33,7 @@ func (b *BufferMetrics) Scrape(db *sql.DB) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	var keys []string
-	for key := range bufferMetrics {
-		keys = append(keys, key)
-	}
-
-	vals := make([]interface{}, len(keys))
-	for i := range keys {
-		vals[i] = new(float64)
-	}
-	err := db.QueryRow("SELECT " + strings.Join(keys, ",") + " FROM pg_stat_bgwriter").Scan(vals...)
-	if err != nil {
-		return errors.New("error running buffers stats query on database: " + err.Error())
-	}
-
-	for i, val := range vals {
-		key := keys[i]
-		if _, ok := b.metrics[key]; !ok {
-			b.metrics[key] = prometheus.NewGauge(prometheus.GaugeOpts{
-				Namespace: namespace,
-				Subsystem: "buffers",
-				Name:      key,
-				Help:      bufferMetrics[key],
-			})
-		}
-
-		b.metrics[key].Set(*val.(*float64))
-	}
-
-	return nil
+	return getMetrics(db, b.metrics, bufferMetrics, "buffers", "pg_stat_bgwriter", nil)
 }
 
 func (b *BufferMetrics) Describe(ch chan<- *prometheus.Desc) {

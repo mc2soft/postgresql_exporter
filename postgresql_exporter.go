@@ -5,6 +5,7 @@ import (
 	"flag"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,7 @@ var (
 	metricPath    = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
 	database      = flag.String("db.name", "", "Name of monitored DB.")
 	slow          = flag.Int("db.consider-query-slow", 5, "Queries with execution time higher than this value will be considered as slow (in seconds)")
+	tables        = flag.String("db.tables", "", "Comma-separated list of tables to track")
 )
 
 type Exporter struct {
@@ -36,7 +38,7 @@ type Exporter struct {
 }
 
 func NewPostgreSQLExporter(dsn string) *Exporter {
-	return &Exporter{
+	e := &Exporter{
 		dsn: dsn,
 		metrics: []metrics.Metric{
 			metrics.NewBufferMetrics(),
@@ -60,6 +62,12 @@ func NewPostgreSQLExporter(dsn string) *Exporter {
 			Help:      "The last scrape error status.",
 		}),
 	}
+
+	for _, table := range strings.Split(*tables, ",") {
+		e.metrics = append(e.metrics, metrics.NewTableMetrics(table))
+	}
+
+	return e
 }
 
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
