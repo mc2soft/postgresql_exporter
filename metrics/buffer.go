@@ -53,7 +53,7 @@ func (b *BufferMetrics) Scrape(db *sql.DB) error {
 		key := keys[i]
 		if _, ok := b.metrics[key]; !ok {
 			b.metrics[key] = prometheus.NewGauge(prometheus.GaugeOpts{
-				Namespace: "postgresql",
+				Namespace: namespace,
 				Subsystem: "buffers",
 				Name:      key,
 				Help:      bufferMetrics[key],

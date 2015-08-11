@@ -37,13 +37,13 @@ func NewDBMetrics(dbName string) *DBMetrics {
 		metrics: map[string]prometheus.Gauge{},
 	}
 	d.metrics["db_size"] = prometheus.NewGauge(prometheus.GaugeOpts{
-		Namespace: "postgresql",
+		Namespace: namespace,
 		Subsystem: "database_" + d.name,
 		Name:      "db_size",
 		Help:      "Size of database",
 	})
 	d.metrics["cache_hit_ratio"] = prometheus.NewGauge(prometheus.GaugeOpts{
-		Namespace: "postgresql",
+		Namespace: namespace,
 		Subsystem: "database_" + d.name,
 		Name:      "cache_hit_ratio",
 		Help:      "Cache hit ratio",
@@ -81,7 +81,7 @@ func (d *DBMetrics) Scrape(db *sql.DB) error {
 		key := keys[i]
 		if _, ok := d.metrics[key]; !ok {
 			d.metrics[key] = prometheus.NewGauge(prometheus.GaugeOpts{
-				Namespace: "postgresql",
+				Namespace: namespace,
 				Subsystem: "database_" + d.name,
 				Name:      key,
 				Help:      dbMetrics[key],

@@ -19,17 +19,17 @@ func NewSlowQueryMetrics(secondsToConsiderSlow int) *SlowQueryMetrics {
 		seconds: secondsToConsiderSlow,
 		metrics: map[string]prometheus.Gauge{
 			"slow_queries": prometheus.NewGauge(prometheus.GaugeOpts{
-				Namespace: "postgresql",
+				Namespace: namespace,
 				Name:      "slow_queries",
 				Help:      "Number of slow queries",
 			}),
 			"slow_select_queries": prometheus.NewGauge(prometheus.GaugeOpts{
-				Namespace: "postgresql",
+				Namespace: namespace,
 				Name:      "slow_select_queries",
 				Help:      "Number of slow SELECT queries",
 			}),
 			"slow_dml_queries": prometheus.NewGauge(prometheus.GaugeOpts{
-				Namespace: "postgresql",
+				Namespace: namespace,
 				Name:      "slow_dml_queries",
 				Help:      "Number of slow data manipulation queries (INSERT, UPDATE, DELETE)",
 			}),

@@ -17,8 +17,7 @@ import (
 )
 
 const (
-	namespace     = "postgresql"
-	bufferSection = "buffer"
+	namespace = "postgresql"
 )
 
 var (
