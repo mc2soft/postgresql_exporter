@@ -5,8 +5,6 @@ import (
 	"flag"
 	"net/http"
 	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +12,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/log"
+
+	"github.com/mc2soft/postgresql_exporter/metrics"
 )
 
 const (
@@ -27,21 +27,10 @@ var (
 	database      = flag.String("db.name", "", "Name of monitored DB.")
 )
 
-var (
-	bufferMetrics = map[string]string{
-		"buffers_checkpoint":    "Number of buffers written during checkpoints",
-		"buffers_clean":         "Number of buffers written by the background writer",
-		"maxwritten_clean":      "Number of times the background writer stopped a cleaning scan because it had written too many buffers",
-		"buffers_backend":       "Number of buffers written directly by a backend",
-		"buffers_backend_fsync": "Number of times a backend had to execute its own fsync call (normally the background writer handles those even when the backend does its own write)",
-		"buffers_alloc":         "Number of buffers allocated",
-	}
-)
-
 type Exporter struct {
 	m                sync.Mutex
 	dsn              string
-	metrics          map[string]prometheus.Gauge
+	metrics          []metrics.Metric
 	totalScrapes     prometheus.Counter
 	duration, errors prometheus.Gauge
 }
@@ -49,7 +38,7 @@ type Exporter struct {
 func NewPostgreSQLExporter(dsn string) *Exporter {
 	return &Exporter{
 		dsn:     dsn,
-		metrics: map[string]prometheus.Gauge{},
+		metrics: []metrics.Metric{metrics.NewBufferMetrics()},
 		totalScrapes: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Name:      "exporter_scrapes_total",
@@ -86,31 +75,12 @@ type metric struct {
 }
 
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
-	scrapes := make(chan metric)
+	finish := make(chan struct{})
 
-	go e.scrape(scrapes)
+	go e.scrape(finish)
 	e.m.Lock()
 	defer e.m.Unlock()
-
-	for m := range scrapes {
-		name := strings.ToLower(m.key)
-		value, err := strconv.ParseFloat(m.val, 64)
-		if err != nil {
-			continue
-		}
-
-		if _, ok := e.metrics[name]; !ok {
-			e.metrics[name] = prometheus.NewGauge(prometheus.GaugeOpts{
-				Namespace: namespace,
-				Subsystem: m.section,
-				Name:      name,
-				Help:      bufferMetrics[name],
-			})
-		}
-
-		e.metrics[name].Set(value)
-	}
-
+	<-finish
 	ch <- e.duration
 	ch <- e.totalScrapes
 	ch <- e.errors
@@ -118,11 +88,10 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	for _, m := range e.metrics {
 		m.Collect(ch)
 	}
-
 }
 
-func (e *Exporter) scrape(scrapes chan<- metric) {
-	defer close(scrapes)
+func (e *Exporter) scrape(finish chan<- struct{}) {
+	defer func() { finish <- struct{}{} }()
 
 	now := time.Now().UnixNano()
 
@@ -137,33 +106,14 @@ func (e *Exporter) scrape(scrapes chan<- metric) {
 	}
 	defer db.Close()
 
-	var keys []string
-	for key := range bufferMetrics {
-		keys = append(keys, key)
-	}
-
-	// collect buffer metrics
-
-	vals := make([]interface{}, len(keys))
-	for i := range keys {
-		vals[i] = new(string)
-	}
-	err = db.QueryRow("SELECT " + strings.Join(keys, ",") + " FROM pg_stat_bgwriter").Scan(vals...)
-	if err != nil {
-		log.Println("error running buffers stats query on database: ", err)
-		e.errors.Set(1)
-		e.duration.Set(float64(time.Now().UnixNano()-now) / 1000000000)
-		return
-	}
-
-	for i, val := range vals {
-		res := metric{
-			section: bufferSection,
-			key:     keys[i],
-			val:     *val.(*string),
+	for _, m := range e.metrics {
+		err = m.Scrape(db)
+		if err != nil {
+			log.Println(err)
+			e.errors.Set(1)
+			e.duration.Set(float64(time.Now().UnixNano()-now) / 1000000000)
+			return
 		}
-
-		scrapes <- res
 	}
 }
 
