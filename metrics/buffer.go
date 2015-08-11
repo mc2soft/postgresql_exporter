@@ -47,3 +47,6 @@ func (b *BufferMetrics) Collect(ch chan<- prometheus.Metric) {
 		m.Collect(ch)
 	}
 }
+
+// check interface
+var _ Metric = new(BufferMetrics)

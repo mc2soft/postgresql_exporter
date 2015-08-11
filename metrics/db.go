@@ -89,3 +89,6 @@ func (d *DBMetrics) Collect(ch chan<- prometheus.Metric) {
 		m.Collect(ch)
 	}
 }
+
+// check interface
+var _ Metric = new(DBMetrics)

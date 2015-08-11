@@ -25,8 +25,8 @@ var (
 	listenAddress = flag.String("web.listen-address", ":9104", "Address to listen on for web interface and telemetry.")
 	metricPath    = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
 	database      = flag.String("db.name", "", "Name of monitored DB.")
-	slow          = flag.Int("db.consider-query-slow", 5, "Queries with execution time higher than this value will be considered as slow (in seconds)")
-	tables        = flag.String("db.tables", "", "Comma-separated list of tables to track")
+	slow          = flag.Int("db.consider-query-slow", 5, "Queries with execution time higher than this value will be considered as slow (in seconds).")
+	tables        = flag.String("db.tables", "", "Comma-separated list of tables to track.")
 )
 
 type Exporter struct {
@@ -129,7 +129,7 @@ func (e *Exporter) scrape(finish chan<- struct{}) {
 	}
 }
 
-// check interfaces
+// check interface
 var _ prometheus.Collector = new(Exporter)
 
 func main() {
