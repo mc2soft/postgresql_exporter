@@ -25,6 +25,7 @@ var (
 	listenAddress = flag.String("web.listen-address", ":9104", "Address to listen on for web interface and telemetry.")
 	metricPath    = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
 	database      = flag.String("db.name", "", "Name of monitored DB.")
+	slow          = flag.Int("db.consider-query-slow", 5, "Queries with execution time higher than this value will be considered as slow (in seconds)")
 )
 
 type Exporter struct {
@@ -41,6 +42,7 @@ func NewPostgreSQLExporter(dsn string) *Exporter {
 		metrics: []metrics.Metric{
 			metrics.NewBufferMetrics(),
 			metrics.NewDBMetrics(*database),
+			metrics.NewSlowQueryMetrics(*slow),
 		},
 		totalScrapes: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
