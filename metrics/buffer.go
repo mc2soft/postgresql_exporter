@@ -3,7 +3,6 @@ package metrics
 import (
 	"database/sql"
 	"errors"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -22,7 +21,7 @@ var (
 )
 
 type BufferMetrics struct {
-	m       sync.Mutex
+	mutex   sync.Mutex
 	metrics map[string]prometheus.Gauge
 }
 
@@ -33,19 +32,17 @@ func NewBufferMetrics() *BufferMetrics {
 }
 
 func (b *BufferMetrics) Scrape(db *sql.DB) error {
-	b.m.Lock()
-	defer b.m.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 
 	var keys []string
 	for key := range bufferMetrics {
 		keys = append(keys, key)
 	}
 
-	// collect buffer metrics
-
 	vals := make([]interface{}, len(keys))
 	for i := range keys {
-		vals[i] = new(string)
+		vals[i] = new(float64)
 	}
 	err := db.QueryRow("SELECT " + strings.Join(keys, ",") + " FROM pg_stat_bgwriter").Scan(vals...)
 	if err != nil {
@@ -54,11 +51,6 @@ func (b *BufferMetrics) Scrape(db *sql.DB) error {
 
 	for i, val := range vals {
 		key := keys[i]
-		value, err := strconv.ParseFloat(*val.(*string), 64)
-		if err != nil {
-			continue
-		}
-
 		if _, ok := b.metrics[key]; !ok {
 			b.metrics[key] = prometheus.NewGauge(prometheus.GaugeOpts{
 				Namespace: "postgresql",
@@ -68,7 +60,7 @@ func (b *BufferMetrics) Scrape(db *sql.DB) error {
 			})
 		}
 
-		b.metrics[key].Set(value)
+		b.metrics[key].Set(*val.(*float64))
 	}
 
 	return nil

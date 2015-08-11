@@ -37,8 +37,11 @@ type Exporter struct {
 
 func NewPostgreSQLExporter(dsn string) *Exporter {
 	return &Exporter{
-		dsn:     dsn,
-		metrics: []metrics.Metric{metrics.NewBufferMetrics()},
+		dsn: dsn,
+		metrics: []metrics.Metric{
+			metrics.NewBufferMetrics(),
+			metrics.NewDBMetrics(*database),
+		},
 		totalScrapes: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Name:      "exporter_scrapes_total",
