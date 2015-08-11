@@ -2,7 +2,16 @@
 
 Prometheus exporter for PostgreSQL server metrics. Supported PostgreSQL versions: 9.0 and up.
 
-## Flags
+
+## Build and run
+
+You need latest version of go to build.
+
+    go build
+    export DATA_SOURCE_NAME='user=username dbname=database password=password sslmode=disable'
+    ./postgresql_exporter <flags>
+
+### Flags
 
 Name                    | Description
 ------------------------|------------
@@ -12,6 +21,11 @@ db.name                 | Name of monitored DB.
 db.consider-query-slow  | Queries with execution time higher than this value will be considered as slow (in seconds). 5 seconds by default.
 db.tables               | Comma-separated list of tables to track.
 
+### Data source name
+
+The PostgreSQL [data source name](http://en.wikipedia.org/wiki/Data_source_name)
+must be set via the `DATA_SOURCE_NAME` environment variable.
+Format and available parameters is described at http://godoc.org/github.com/lib/pq#hdr-Connection_String_Parameters
 
 ## Stats
 
