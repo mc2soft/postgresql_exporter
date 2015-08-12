@@ -12,13 +12,18 @@ const (
 	namespace = "postgresql"
 )
 
-type Metric interface {
+type metric struct {
+	Name string
+	Help string
+}
+
+type Collection interface {
 	Scrape(*sql.DB) error
 	Collect(chan<- prometheus.Metric)
 	Describe(chan<- *prometheus.Desc)
 }
 
-func getMetrics(db *sql.DB, metrics map[string]prometheus.Gauge, metricsDef map[string]string, subsystem, tail string, args []interface{}) error {
+func getMetrics(db *sql.DB, metricsDef map[string]metric, tail string, args []interface{}) (map[string]float64, error) {
 	var keys []string
 	for key := range metricsDef {
 		keys = append(keys, key)
@@ -30,22 +35,14 @@ func getMetrics(db *sql.DB, metrics map[string]prometheus.Gauge, metricsDef map[
 	}
 	err := db.QueryRow("SELECT "+strings.Join(keys, ",")+" FROM "+tail, args...).Scan(vals...)
 	if err != nil {
-		return errors.New("error running buffers stats query on database: " + err.Error())
+		return nil, errors.New("error running buffers stats query on database: " + err.Error())
 	}
 
+	result := make(map[string]float64)
 	for i, val := range vals {
 		key := keys[i]
-		if _, ok := metrics[key]; !ok {
-			metrics[key] = prometheus.NewGauge(prometheus.GaugeOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      key,
-				Help:      metricsDef[key],
-			})
-		}
-
-		metrics[key].Set(*val.(*float64))
+		result[key] = *val.(*float64)
 	}
 
-	return nil
+	return result, nil
 }

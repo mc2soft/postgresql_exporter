@@ -17,7 +17,7 @@ Name                    | Description
 ------------------------|------------
 web.listen-address      | Address to listen on for web interface and telemetry.
 web.telemetry-path      | Path under which to expose metrics.
-db.name                 | Name of monitored DB.
+db.names                | Comma-separated list of monitored DB.
 db.consider-query-slow  | Queries with execution time higher than this value will be considered as slow (in seconds). 5 seconds by default.
 db.tables               | Comma-separated list of tables to track.
 

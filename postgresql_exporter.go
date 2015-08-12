@@ -24,7 +24,7 @@ const (
 var (
 	listenAddress = flag.String("web.listen-address", ":9104", "Address to listen on for web interface and telemetry.")
 	metricPath    = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
-	database      = flag.String("db.name", "", "Name of monitored DB.")
+	databases     = flag.String("db.names", "", "Comma-separated list of monitored DB.")
 	slow          = flag.Int("db.consider-query-slow", 5, "Queries with execution time higher than this value will be considered as slow (in seconds).")
 	tables        = flag.String("db.tables", "", "Comma-separated list of tables to track.")
 )
@@ -32,7 +32,7 @@ var (
 type Exporter struct {
 	m                sync.Mutex
 	dsn              string
-	metrics          []metrics.Metric
+	metrics          []metrics.Collection
 	totalScrapes     prometheus.Counter
 	duration, errors prometheus.Gauge
 }
@@ -40,9 +40,10 @@ type Exporter struct {
 func NewPostgreSQLExporter(dsn string) *Exporter {
 	e := &Exporter{
 		dsn: dsn,
-		metrics: []metrics.Metric{
+		metrics: []metrics.Collection{
 			metrics.NewBufferMetrics(),
-			metrics.NewDBMetrics(*database),
+			metrics.NewDBMetrics(strings.Split(*databases, ",")),
+			metrics.NewTableMetrics(strings.Split(*tables, ",")),
 			metrics.NewSlowQueryMetrics(*slow),
 		},
 		totalScrapes: prometheus.NewCounter(prometheus.CounterOpts{
@@ -61,10 +62,6 @@ func NewPostgreSQLExporter(dsn string) *Exporter {
 			Name:      "exporter_last_scrape_error",
 			Help:      "The last scrape error status.",
 		}),
-	}
-
-	for _, table := range strings.Split(*tables, ",") {
-		e.metrics = append(e.metrics, metrics.NewTableMetrics(table))
 	}
 
 	return e
@@ -140,8 +137,8 @@ func main() {
 		log.Fatal("couldn't find environment variable DATA_SOURCE_NAME")
 	}
 
-	if *database == "" {
-		log.Fatal("please specify database name")
+	if *databases == "" {
+		log.Fatal("please specify at least one database")
 	}
 
 	exporter := NewPostgreSQLExporter(dsn)

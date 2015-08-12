@@ -9,44 +9,44 @@ import (
 )
 
 var (
-	tableMetrics = map[string]string{
-		"seq_scan":          "Number of sequential scans initiated on this table",
-		"seq_tup_read":      "Number of live rows fetched by sequential scans",
-		"vacuum_count":      "Number of times this table has been manually vacuumed (not counting VACUUM FULL)",
-		"autovacuum_count":  "Number of times this table has been vacuumed by the autovacuum daemon",
-		"analyze_count":     "Number of times this table has been manually analyzed",
-		"autoanalyze_count": "Number of times this table has been analyzed by the autovacuum daemon",
-		"n_tup_ins":         "Number of rows inserted",
-		"n_tup_upd":         "Number of rows updated",
-		"n_tup_del":         "Number of rows deleted",
-		"n_tup_hot_upd":     "Number of rows HOT updated (i.e., with no separate index update required)",
-		"n_live_tup":        "Estimated number of live rows",
-		"n_dead_tup":        "Estimated number of dead rows",
+	tableMetrics = map[string]metric{
+		"seq_scan":          metric{Name: "seq_scan_total", Help: "Number of sequential scans initiated on this table"},
+		"seq_tup_read":      metric{Name: "seq_tup_read_total", Help: "Number of live rows fetched by sequential scans"},
+		"vacuum_count":      metric{Name: "vacuum_count_total", Help: "Number of times this table has been manually vacuumed (not counting VACUUM FULL)"},
+		"autovacuum_count":  metric{Name: "autovacuum_count_total", Help: "Number of times this table has been vacuumed by the autovacuum daemon"},
+		"analyze_count":     metric{Name: "analyze_count_total", Help: "Number of times this table has been manually analyzed"},
+		"autoanalyze_count": metric{Name: "autoanalyze_count_total", Help: "Number of times this table has been analyzed by the autovacuum daemon"},
+		"n_tup_ins":         metric{Name: "n_tup_ins_total", Help: "Number of rows inserted"},
+		"n_tup_upd":         metric{Name: "n_tup_upd_total", Help: "Number of rows updated"},
+		"n_tup_del":         metric{Name: "n_tup_del_total", Help: "Number of rows deleted"},
+		"n_tup_hot_upd":     metric{Name: "n_tup_hot_upd_total", Help: "Number of rows HOT updated (i.e., with no separate index update required)"},
+		"n_live_tup":        metric{Name: "n_live_tup_total", Help: "Estimated number of live rows"},
+		"n_dead_tup":        metric{Name: "n_dead_tup_total", Help: "Estimated number of dead rows"},
 	}
 )
 
 type TableMetrics struct {
 	mutex   sync.Mutex
-	name    string
-	metrics map[string]prometheus.Gauge
+	names   []string
+	metrics map[string]*prometheus.GaugeVec
 }
 
-func NewTableMetrics(tableName string) *TableMetrics {
+func NewTableMetrics(tableNames []string) *TableMetrics {
 	return &TableMetrics{
-		name: tableName,
-		metrics: map[string]prometheus.Gauge{
-			"table_cache_hit_ratio": prometheus.NewGauge(prometheus.GaugeOpts{
+		names: tableNames,
+		metrics: map[string]*prometheus.GaugeVec{
+			"table_cache_hit_ratio": prometheus.NewGaugeVec(prometheus.GaugeOpts{
 				Namespace: namespace,
-				Subsystem: tableName,
-				Name:      "table_cache_hit_ratio",
-				Help:      "Table " + tableName + " cache hit ratio",
-			}),
-			"table_items_count": prometheus.NewGauge(prometheus.GaugeOpts{
+				Subsystem: "tables",
+				Name:      "cache_hit_ratio_percent",
+				Help:      "Table cache hit ratio",
+			}, []string{"table"}),
+			"table_items_count": prometheus.NewGaugeVec(prometheus.GaugeOpts{
 				Namespace: namespace,
-				Subsystem: tableName,
-				Name:      "table_items_count",
-				Help:      "Table " + tableName + " items count",
-			}),
+				Subsystem: "tables",
+				Name:      "items_count_total",
+				Help:      "Table items count",
+			}, []string{"table"}),
 		},
 	}
 }
@@ -55,25 +55,41 @@ func (t *TableMetrics) Scrape(db *sql.DB) error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
-	ratio := new(float64)
-	query := "SELECT round(heap_blks_hit*100/(heap_blks_hit+heap_blks_read), 2) AS cache_hit_ratio FROM pg_statio_user_tables" +
-		" WHERE relname = $1 AND heap_blks_read > 0 UNION ALL SELECT 0.00 AS cache_hit_ratio ORDER BY cache_hit_ratio DESC LIMIT 1"
-	err := db.QueryRow(query, t.name).Scan(ratio)
-	if err != nil {
-		return errors.New("error running table cache hit stats query on database: " + err.Error())
-	}
-	t.metrics["table_cache_hit_ratio"].Set(*ratio)
+	for _, name := range t.names {
 
-	count := new(float64)
-	err = db.QueryRow("SELECT count(*) FROM " + t.name).Scan(count)
-	if err != nil {
-		return errors.New("error running table items count query on database: " + err.Error())
-	}
-	t.metrics["table_items_count"].Set(*count)
+		ratio := new(float64)
+		query := "SELECT round(heap_blks_hit*100/(heap_blks_hit+heap_blks_read), 2) AS cache_hit_ratio FROM pg_statio_user_tables" +
+			" WHERE relname = $1 AND heap_blks_read > 0 UNION ALL SELECT 0.00 AS cache_hit_ratio ORDER BY cache_hit_ratio DESC LIMIT 1"
+		err := db.QueryRow(query, name).Scan(ratio)
+		if err != nil {
+			return errors.New("error running table cache hit stats query on database: " + err.Error())
+		}
+		t.metrics["table_cache_hit_ratio"].WithLabelValues(name).Set(*ratio)
 
-	err = getMetrics(db, t.metrics, tableMetrics, t.name, "pg_stat_user_tables WHERE relname = $1", []interface{}{t.name})
-	if err != nil {
-		return errors.New("error running table stats query on database: " + err.Error())
+		count := new(float64)
+		err = db.QueryRow("SELECT count(*) FROM " + name).Scan(count)
+		if err != nil {
+			return errors.New("error running table items count query on database: " + err.Error())
+		}
+		t.metrics["table_items_count"].WithLabelValues(name).Set(*count)
+
+		result, err := getMetrics(db, tableMetrics, "pg_stat_user_tables WHERE relname = $1", []interface{}{name})
+		if err != nil {
+			return errors.New("error running table stats query on database: " + err.Error())
+		}
+
+		for key, val := range result {
+			if _, ok := t.metrics[key]; !ok {
+				t.metrics[key] = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+					Namespace: namespace,
+					Subsystem: "tables",
+					Name:      tableMetrics[key].Name,
+					Help:      tableMetrics[key].Help,
+				}, []string{"table"})
+			}
+
+			t.metrics[key].WithLabelValues(name).Set(val)
+		}
 	}
 
 	return nil
@@ -92,4 +108,4 @@ func (t *TableMetrics) Collect(ch chan<- prometheus.Metric) {
 }
 
 // check interface
-var _ Metric = new(TableMetrics)
+var _ Collection = new(TableMetrics)

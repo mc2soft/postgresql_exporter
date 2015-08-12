@@ -20,17 +20,17 @@ func NewSlowQueryMetrics(secondsToConsiderSlow int) *SlowQueryMetrics {
 		metrics: map[string]prometheus.Gauge{
 			"slow_queries": prometheus.NewGauge(prometheus.GaugeOpts{
 				Namespace: namespace,
-				Name:      "slow_queries",
+				Name:      "slow_queries_total",
 				Help:      "Number of slow queries",
 			}),
 			"slow_select_queries": prometheus.NewGauge(prometheus.GaugeOpts{
 				Namespace: namespace,
-				Name:      "slow_select_queries",
+				Name:      "slow_select_queries_total",
 				Help:      "Number of slow SELECT queries",
 			}),
 			"slow_dml_queries": prometheus.NewGauge(prometheus.GaugeOpts{
 				Namespace: namespace,
-				Name:      "slow_dml_queries",
+				Name:      "slow_dml_queries_total",
 				Help:      "Number of slow data manipulation queries (INSERT, UPDATE, DELETE)",
 			}),
 		},
@@ -76,4 +76,4 @@ func (s *SlowQueryMetrics) Collect(ch chan<- prometheus.Metric) {
 }
 
 // check interface
-var _ Metric = new(SlowQueryMetrics)
+var _ Collection = new(SlowQueryMetrics)
