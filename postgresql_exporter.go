@@ -43,7 +43,6 @@ func NewPostgreSQLExporter(dsn string) *Exporter {
 		metrics: []metrics.Collection{
 			metrics.NewBufferMetrics(),
 			metrics.NewDBMetrics(strings.Split(*databases, ",")),
-			metrics.NewTableMetrics(strings.Split(*tables, ",")),
 			metrics.NewSlowQueryMetrics(*slow),
 		},
 		totalScrapes: prometheus.NewCounter(prometheus.CounterOpts{
@@ -62,6 +61,10 @@ func NewPostgreSQLExporter(dsn string) *Exporter {
 			Name:      "exporter_last_scrape_error",
 			Help:      "The last scrape error status.",
 		}),
+	}
+
+	if len(*tables) > 0 {
+		e.metrics = append(e.metrics, metrics.NewTableMetrics(strings.Split(*tables, ",")))
 	}
 
 	return e
