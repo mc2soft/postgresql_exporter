@@ -1,0 +1,4 @@
+---
+assets_by_kind_count: "SELECT kind, COUNT(*) AS gauge_value FROM assets GROUP BY kind"
+assets_count: "SELECT COUNT(*) AS gauge_value FROM assets"
+

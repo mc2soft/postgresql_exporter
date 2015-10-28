@@ -27,6 +27,7 @@ var (
 	databases     = flag.String("db.names", "", "Comma-separated list of monitored DB.")
 	slow          = flag.Int("db.consider-query-slow", 5, "Queries with execution time higher than this value will be considered as slow (in seconds).")
 	tables        = flag.String("db.tables", "", "Comma-separated list of tables to track.")
+	queries       = flag.String("queries.config-path", "", "Path to yaml files with custom queries")
 )
 
 type Exporter struct {
@@ -35,9 +36,10 @@ type Exporter struct {
 	metrics          []metrics.Collection
 	totalScrapes     prometheus.Counter
 	duration, errors prometheus.Gauge
+	customQueries    []customQuery
 }
 
-func NewPostgreSQLExporter(dsn string) *Exporter {
+func NewPostgreSQLExporter(dsn string, cq []customQuery) *Exporter {
 	e := &Exporter{
 		dsn: dsn,
 		metrics: []metrics.Collection{
@@ -55,12 +57,12 @@ func NewPostgreSQLExporter(dsn string) *Exporter {
 			Name:      "exporter_last_scrape_duration_seconds",
 			Help:      "The last scrape duration.",
 		}),
-
 		errors: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Name:      "exporter_last_scrape_error",
 			Help:      "The last scrape error status.",
 		}),
+		customQueries: cq,
 	}
 
 	if len(*tables) > 0 {
@@ -73,6 +75,14 @@ func NewPostgreSQLExporter(dsn string) *Exporter {
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	for _, m := range e.metrics {
 		m.Describe(ch)
+	}
+
+	for _, cq := range e.customQueries {
+		if cq.Counter != nil {
+			cq.Counter.Describe(ch)
+		} else {
+			cq.Gauge.Describe(ch)
+		}
 	}
 
 	ch <- e.duration.Desc()
@@ -100,6 +110,14 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	for _, m := range e.metrics {
 		m.Collect(ch)
 	}
+
+	for _, cq := range e.customQueries {
+		if cq.Counter != nil {
+			cq.Counter.Collect(ch)
+		} else {
+			cq.Gauge.Collect(ch)
+		}
+	}
 }
 
 func (e *Exporter) scrape(finish chan<- struct{}) {
@@ -118,6 +136,24 @@ func (e *Exporter) scrape(finish chan<- struct{}) {
 	}
 	defer db.Close()
 
+	for _, cq := range e.customQueries {
+		labels, counts, err := executeQuery(db, cq.Query, cq.LabelsCount)
+		if err != nil {
+			log.Println(err)
+			e.errors.Set(1)
+			e.duration.Set(float64(time.Now().UnixNano()-now) / 1000000000)
+			return
+		}
+
+		for i := range labels {
+			if cq.Counter != nil {
+				cq.Counter.WithLabelValues(labels[i]...).Set(float64(counts[i]))
+			} else {
+				cq.Gauge.WithLabelValues(labels[i]...).Set(float64(counts[i]))
+			}
+		}
+	}
+
 	for _, m := range e.metrics {
 		err = m.Scrape(db)
 		if err != nil {
@@ -127,6 +163,38 @@ func (e *Exporter) scrape(finish chan<- struct{}) {
 			return
 		}
 	}
+
+	e.errors.Set(0)
+	e.duration.Set(float64(time.Now().UnixNano()-now) / 1000000000)
+}
+
+func executeQuery(db *sql.DB, query string, labelsCount int) (labels [][]string, counts []int64, err error) {
+	rows, err := db.Query(query)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var vals []interface{}
+		var count int64
+		l := make([]string, labelsCount)
+		for i := range l {
+			vals = append(vals, &l[i])
+		}
+		vals = append(vals, &count)
+
+		err = rows.Scan(vals...)
+		if err != nil {
+			return
+		}
+
+		labels = append(labels, l)
+		counts = append(counts, count)
+	}
+	err = rows.Err()
+
+	return
 }
 
 // check interface
@@ -144,7 +212,7 @@ func main() {
 		log.Fatal("please specify at least one database")
 	}
 
-	exporter := NewPostgreSQLExporter(dsn)
+	exporter := NewPostgreSQLExporter(dsn, parseQueries(*queries))
 	prometheus.MustRegister(exporter)
 	http.Handle(*metricPath, prometheus.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
