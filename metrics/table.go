@@ -47,6 +47,12 @@ func NewTableMetrics(tableNames []string) *TableMetrics {
 				Name:      "items_count_total",
 				Help:      "Table items count",
 			}, []string{"table"}),
+			"table_size": prometheus.NewGaugeVec(prometheus.GaugeOpts{
+				Namespace: namespace,
+				Subsystem: "tables",
+				Name:      "size_bytes",
+				Help:      "Total table size including indexes",
+			}, []string{"table"}),
 		},
 	}
 }
@@ -72,6 +78,10 @@ func (t *TableMetrics) Scrape(db *sql.DB) error {
 			return errors.New("error running table items count query on database: " + err.Error())
 		}
 		t.metrics["table_items_count"].WithLabelValues(name).Set(*count)
+
+		size := new(float64)
+		err = db.QueryRow("SELECT pg_total_relation_size($1)", name).Scan(size)
+		t.metrics["table_size"].WithLabelValues(name).Set(*size)
 
 		result, err := getMetrics(db, tableMetrics, "pg_stat_user_tables WHERE relname = $1", []interface{}{name})
 		if err != nil {
