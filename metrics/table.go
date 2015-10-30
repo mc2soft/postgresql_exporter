@@ -61,6 +61,16 @@ func (t *TableMetrics) Scrape(db *sql.DB) error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
+	if len(t.names) == 1 && t.names[0] == "*" {
+		// we will get all tables only once on first scrape
+		// so don't forget to restart exporter after adding/removing tables
+		names, err := t.getAllTablesForDB(db)
+		if err != nil {
+			return nil
+		}
+		t.names = names
+	}
+
 	for _, name := range t.names {
 
 		ratio := new(float64)
@@ -115,6 +125,31 @@ func (t *TableMetrics) Collect(ch chan<- prometheus.Metric) {
 	for _, m := range t.metrics {
 		m.Collect(ch)
 	}
+}
+
+func (t *TableMetrics) getAllTablesForDB(db *sql.DB) ([]string, error) {
+	// get all tables from database and cache them
+	// it will happen only first scrape
+	rows, err := db.Query("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")
+	if err != nil {
+		return nil, err
+	}
+
+	var names []string
+	for rows.Next() {
+		var name string
+		err = rows.Scan(&name)
+		if err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	err = rows.Err()
+	if err != nil {
+		return nil, err
+	}
+
+	return names, nil
 }
 
 // check interface

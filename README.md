@@ -19,7 +19,8 @@ web.listen-address      | Address to listen on for web interface and telemetry.
 web.telemetry-path      | Path under which to expose metrics.
 db.names                | Comma-separated list of monitored DB.
 db.consider-query-slow  | Queries with execution time higher than this value will be considered as slow (in seconds). 5 seconds by default.
-db.tables               | Comma-separated list of tables to track.
+db.tables               | Comma-separated list of tables to track. Pass `*` to track all tables from DSN database
+
 
 ### Data source name
 
@@ -72,6 +73,7 @@ Exporter will send following stats to prometheus
 * `n_dead_tup`            - Estimated number of dead rows
 * `table_cache_hit_ratio` - Table cache hit ration in percents
 * `table_items_count`     - Table overall items count
+* `table_size`            - Total table size including indexes in bytes
 
 ### Slow queries
 
