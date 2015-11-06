@@ -1,0 +1,9 @@
+---
+- name: assets_by_kind_count
+  help: Count of assets by kind.
+  query: "SELECT COUNT(*), kind FROM assets GROUP BY kind"
+
+- name: assets_count
+  help: Overal count of assets.
+  query: "SELECT COUNT(*) FROM assets"
+
