@@ -3,6 +3,7 @@ package metrics
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -26,34 +27,52 @@ var (
 )
 
 type TableMetrics struct {
-	mutex   sync.Mutex
-	names   []string
-	metrics map[string]*prometheus.GaugeVec
+	mutex    sync.Mutex
+	names    []string
+	namesMap map[string]struct{}
+	metrics  map[string]*prometheus.GaugeVec
 }
 
 func NewTableMetrics(tableNames []string) *TableMetrics {
+	namesMap := make(map[string]struct{})
+	for _, name := range tableNames {
+		namesMap[name] = struct{}{}
+	}
+
+	metrics := map[string]*prometheus.GaugeVec{
+		"table_cache_hit_ratio": prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: "tables",
+			Name:      "cache_hit_ratio_percent",
+			Help:      "Table cache hit ratio",
+		}, []string{"table"}),
+		"table_items_count": prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: "tables",
+			Name:      "items_count_total",
+			Help:      "Table items count",
+		}, []string{"table"}),
+		"table_size": prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: "tables",
+			Name:      "size_bytes",
+			Help:      "Total table size including indexes",
+		}, []string{"table"}),
+	}
+
+	for name, metric := range tableMetrics {
+		metrics[name] = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: "tables",
+			Name:      metric.Name,
+			Help:      metric.Help,
+		}, []string{"table"})
+	}
+
 	return &TableMetrics{
-		names: tableNames,
-		metrics: map[string]*prometheus.GaugeVec{
-			"table_cache_hit_ratio": prometheus.NewGaugeVec(prometheus.GaugeOpts{
-				Namespace: namespace,
-				Subsystem: "tables",
-				Name:      "cache_hit_ratio_percent",
-				Help:      "Table cache hit ratio",
-			}, []string{"table"}),
-			"table_items_count": prometheus.NewGaugeVec(prometheus.GaugeOpts{
-				Namespace: namespace,
-				Subsystem: "tables",
-				Name:      "items_count_total",
-				Help:      "Table items count",
-			}, []string{"table"}),
-			"table_size": prometheus.NewGaugeVec(prometheus.GaugeOpts{
-				Namespace: namespace,
-				Subsystem: "tables",
-				Name:      "size_bytes",
-				Help:      "Total table size including indexes",
-			}, []string{"table"}),
-		},
+		names:    tableNames,
+		namesMap: namesMap,
+		metrics:  metrics,
 	}
 }
 
@@ -68,48 +87,22 @@ func (t *TableMetrics) Scrape(db *sql.DB) error {
 		if err != nil {
 			return nil
 		}
+		namesMap := make(map[string]struct{})
+		for _, name := range names {
+			namesMap[name] = struct{}{}
+		}
 		t.names = names
+		t.namesMap = namesMap
 	}
 
-	for _, name := range t.names {
+	err := t.getCacheRatio(db)
+	if err != nil {
+		return err
+	}
 
-		ratio := new(float64)
-		query := "SELECT round(heap_blks_hit*100/(heap_blks_hit+heap_blks_read), 2) AS cache_hit_ratio FROM pg_statio_user_tables" +
-			" WHERE relname = $1 AND heap_blks_read > 0 UNION ALL SELECT 0.00 AS cache_hit_ratio ORDER BY cache_hit_ratio DESC LIMIT 1"
-		err := db.QueryRow(query, name).Scan(ratio)
-		if err != nil {
-			return errors.New("error running table cache hit stats query on database: " + err.Error())
-		}
-		t.metrics["table_cache_hit_ratio"].WithLabelValues(name).Set(*ratio)
-
-		count := new(float64)
-		err = db.QueryRow("SELECT count(*) FROM " + name).Scan(count)
-		if err != nil {
-			return errors.New("error running table items count query on database: " + err.Error())
-		}
-		t.metrics["table_items_count"].WithLabelValues(name).Set(*count)
-
-		size := new(float64)
-		err = db.QueryRow("SELECT pg_total_relation_size($1)", name).Scan(size)
-		t.metrics["table_size"].WithLabelValues(name).Set(*size)
-
-		result, err := getMetrics(db, tableMetrics, "pg_stat_user_tables WHERE relname = $1", []interface{}{name})
-		if err != nil {
-			return errors.New("error running table stats query on database: " + err.Error())
-		}
-
-		for key, val := range result {
-			if _, ok := t.metrics[key]; !ok {
-				t.metrics[key] = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-					Namespace: namespace,
-					Subsystem: "tables",
-					Name:      tableMetrics[key].Name,
-					Help:      tableMetrics[key].Help,
-				}, []string{"table"})
-			}
-
-			t.metrics[key].WithLabelValues(name).Set(val)
-		}
+	err = t.getTableSizes(db)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -125,6 +118,92 @@ func (t *TableMetrics) Collect(ch chan<- prometheus.Metric) {
 	for _, m := range t.metrics {
 		m.Collect(ch)
 	}
+}
+
+func (t *TableMetrics) getTableMetrics(db *sql.DB) error {
+	selectClause := []string{"relname"}
+	for col := range tableMetrics {
+		selectClause = append(selectClause, col)
+	}
+
+	query := "SELECT " + strings.Join(selectClause, ", ") + " FROM pg_stat_user_tables WHERE schemaname = $1"
+	rows, err := db.Query(query, "public")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name string
+		args := []interface{}{&name}
+		vals := make([]float64, len(tableMetrics))
+		for i := range vals {
+			args = append(args, &vals[i])
+		}
+		err = rows.Scan(args...)
+		if err != nil {
+			return err
+		}
+
+		for i, col := range selectClause {
+			t.metrics[col].WithLabelValues(name).Set(vals[i])
+		}
+	}
+
+	return rows.Err()
+}
+
+func (t *TableMetrics) getTableSizes(db *sql.DB) error {
+	query := "SELECT table_name, pg_total_relation_size(table_name) FROM information_schema.tables WHERE table_schema='public'"
+	rows, err := db.Query(query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name string
+		var size float64
+		err = rows.Scan(&name, &size)
+		if err != nil {
+			return err
+		}
+
+		if _, ok := t.namesMap[name]; !ok {
+			// process only selected tables
+			continue
+		}
+		t.metrics["table_size"].WithLabelValues(name).Set(size)
+	}
+
+	return rows.Err()
+}
+
+func (t *TableMetrics) getCacheRatio(db *sql.DB) error {
+	query := "SELECT relname, round(heap_blks_hit*100/(heap_blks_hit+heap_blks_read), 2) AS cache_hit_ratio" +
+		" FROM pg_statio_user_tables WHERE heap_blks_read > 0"
+	rows, err := db.Query(query)
+	if err != nil {
+		return errors.New("error running table cache hit stats query on database: " + err.Error())
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name string
+		var ratio float64
+		err := rows.Scan(&name, &ratio)
+		if err != nil {
+			return errors.New("error running table cache hit stats query on database: " + err.Error())
+		}
+
+		if _, ok := t.namesMap[name]; !ok {
+			// process only selected tables
+			continue
+		}
+		t.metrics["table_cache_hit_ratio"].WithLabelValues(name).Set(ratio)
+	}
+
+	return rows.Err()
 }
 
 func (t *TableMetrics) getAllTablesForDB(db *sql.DB) ([]string, error) {
