@@ -21,6 +21,8 @@ const (
 	namespace = "postgresql"
 )
 
+var db *sql.DB
+
 var (
 	listenAddress = flag.String("web.listen-address", ":9104", "Address to listen on for web interface and telemetry.")
 	metricPath    = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
@@ -36,16 +38,16 @@ type Exporter struct {
 	metrics          []metrics.Collection
 	totalScrapes     prometheus.Counter
 	duration, errors prometheus.Gauge
-	customQueries    []customQuery
 }
 
-func NewPostgreSQLExporter(dsn string, cq []customQuery) *Exporter {
+func NewPostgreSQLExporter(dsn string, cq []metrics.CustomQuery) *Exporter {
 	e := &Exporter{
 		dsn: dsn,
 		metrics: []metrics.Collection{
 			metrics.NewBufferMetrics(),
 			metrics.NewDBMetrics(strings.Split(*databases, ",")),
 			metrics.NewSlowQueryMetrics(*slow),
+			metrics.NewCustomQueryMetrics(cq),
 		},
 		totalScrapes: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
@@ -62,7 +64,6 @@ func NewPostgreSQLExporter(dsn string, cq []customQuery) *Exporter {
 			Name:      "exporter_last_scrape_error",
 			Help:      "The last scrape error status.",
 		}),
-		customQueries: cq,
 	}
 
 	if len(*tables) > 0 {
@@ -77,14 +78,6 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 		m.Describe(ch)
 	}
 
-	for _, cq := range e.customQueries {
-		if cq.Counter != nil {
-			cq.Counter.Describe(ch)
-		} else {
-			cq.Gauge.Describe(ch)
-		}
-	}
-
 	ch <- e.duration.Desc()
 	ch <- e.totalScrapes.Desc()
 	ch <- e.errors.Desc()
@@ -97,12 +90,10 @@ type metric struct {
 }
 
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
-	finish := make(chan struct{})
-
-	go e.scrape(finish)
 	e.m.Lock()
 	defer e.m.Unlock()
-	<-finish
+	e.scrape()
+
 	ch <- e.duration
 	ch <- e.totalScrapes
 	ch <- e.errors
@@ -110,52 +101,15 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	for _, m := range e.metrics {
 		m.Collect(ch)
 	}
-
-	for _, cq := range e.customQueries {
-		if cq.Counter != nil {
-			cq.Counter.Collect(ch)
-		} else {
-			cq.Gauge.Collect(ch)
-		}
-	}
 }
 
-func (e *Exporter) scrape(finish chan<- struct{}) {
-	defer func() { finish <- struct{}{} }()
-
+func (e *Exporter) scrape() {
 	now := time.Now().UnixNano()
 
 	e.totalScrapes.Inc()
 
-	db, err := sql.Open("postgres", e.dsn)
-	if err != nil {
-		log.Println("error opening connection to database: ", err)
-		e.errors.Set(1)
-		e.duration.Set(float64(time.Now().UnixNano()-now) / 1000000000)
-		return
-	}
-	defer db.Close()
-
-	for _, cq := range e.customQueries {
-		labels, counts, err := executeQuery(db, cq.Query, cq.LabelsCount)
-		if err != nil {
-			log.Println(err)
-			e.errors.Set(1)
-			e.duration.Set(float64(time.Now().UnixNano()-now) / 1000000000)
-			return
-		}
-
-		for i := range labels {
-			if cq.Counter != nil {
-				cq.Counter.WithLabelValues(labels[i]...).Set(float64(counts[i]))
-			} else {
-				cq.Gauge.WithLabelValues(labels[i]...).Set(float64(counts[i]))
-			}
-		}
-	}
-
 	for _, m := range e.metrics {
-		err = m.Scrape(db)
+		err := m.Scrape(db)
 		if err != nil {
 			log.Println(err)
 			e.errors.Set(1)
@@ -166,35 +120,6 @@ func (e *Exporter) scrape(finish chan<- struct{}) {
 
 	e.errors.Set(0)
 	e.duration.Set(float64(time.Now().UnixNano()-now) / 1000000000)
-}
-
-func executeQuery(db *sql.DB, query string, labelsCount int) (labels [][]string, counts []int64, err error) {
-	rows, err := db.Query(query)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var vals []interface{}
-		var count int64
-		l := make([]string, labelsCount)
-		for i := range l {
-			vals = append(vals, &l[i])
-		}
-		vals = append(vals, &count)
-
-		err = rows.Scan(vals...)
-		if err != nil {
-			return
-		}
-
-		labels = append(labels, l)
-		counts = append(counts, count)
-	}
-	err = rows.Err()
-
-	return
 }
 
 // check interface
@@ -211,6 +136,20 @@ func main() {
 	if *databases == "" {
 		log.Fatal("please specify at least one database")
 	}
+
+	var err error
+	db, err = sql.Open("postgres", dsn)
+	if err != nil {
+		log.Fatal("error opening connection to database: ", err)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		log.Fatal("error opening connection to database: ", err)
+	}
+
+	db.SetMaxIdleConns(5)
+	db.SetMaxOpenConns(5)
 
 	exporter := NewPostgreSQLExporter(dsn, parseQueries(*queries))
 	prometheus.MustRegister(exporter)

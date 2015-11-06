@@ -134,6 +134,7 @@ func (t *TableMetrics) getAllTablesForDB(db *sql.DB) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	var names []string
 	for rows.Next() {
