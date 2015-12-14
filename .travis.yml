@@ -1,0 +1,12 @@
+language: go
+
+env:
+  - GO15VENDOREXPERIMENT=1
+
+go:
+  - 1.5.2
+  - tip
+
+install: true
+
+script: go install -v

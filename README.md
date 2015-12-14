@@ -1,4 +1,4 @@
-# PostgreSQL Server Exporter
+# PostgreSQL Server Exporter [![Build Status](https://travis-ci.org/mc2soft/postgresql_exporter.svg)](https://travis-ci.org/mc2soft/postgresql_exporter)
 
 Prometheus exporter for PostgreSQL server metrics. Supported PostgreSQL versions: 9.0 and up.
 
