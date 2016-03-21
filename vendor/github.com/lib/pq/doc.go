@@ -5,9 +5,8 @@ In most cases clients will use the database/sql package instead of
 using this package directly. For example:
 
 	import (
-		"database/sql"
-
 		_ "github.com/lib/pq"
+		"database/sql"
 	)
 
 	func main() {

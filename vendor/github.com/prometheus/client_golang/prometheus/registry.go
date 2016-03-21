@@ -33,10 +33,13 @@ import (
 	"strings"
 	"sync"
 
+	"bitbucket.org/ww/goautoneg"
 	"github.com/golang/protobuf/proto"
-	"github.com/prometheus/common/expfmt"
 
 	dto "github.com/prometheus/client_model/go"
+
+	"github.com/prometheus/client_golang/model"
+	"github.com/prometheus/client_golang/text"
 )
 
 var (
@@ -343,7 +346,7 @@ func (r *registry) Push(job, instance, pushURL, method string) error {
 	}
 	buf := r.getBuf()
 	defer r.giveBuf(buf)
-	if err := r.writePB(expfmt.NewEncoder(buf, expfmt.FmtProtoDelim)); err != nil {
+	if _, err := r.writePB(buf, text.WriteProtoDelimited); err != nil {
 		if r.panicOnCollectError {
 			panic(err)
 		}
@@ -366,11 +369,11 @@ func (r *registry) Push(job, instance, pushURL, method string) error {
 }
 
 func (r *registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	contentType := expfmt.Negotiate(req.Header)
+	enc, contentType := chooseEncoder(req)
 	buf := r.getBuf()
 	defer r.giveBuf(buf)
 	writer, encoding := decorateWriter(req, buf)
-	if err := r.writePB(expfmt.NewEncoder(writer, contentType)); err != nil {
+	if _, err := r.writePB(writer, enc); err != nil {
 		if r.panicOnCollectError {
 			panic(err)
 		}
@@ -381,7 +384,7 @@ func (r *registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		closer.Close()
 	}
 	header := w.Header()
-	header.Set(contentTypeHeader, string(contentType))
+	header.Set(contentTypeHeader, contentType)
 	header.Set(contentLengthHeader, fmt.Sprint(buf.Len()))
 	if encoding != "" {
 		header.Set(contentEncodingHeader, encoding)
@@ -389,7 +392,7 @@ func (r *registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Write(buf.Bytes())
 }
 
-func (r *registry) writePB(encoder expfmt.Encoder) error {
+func (r *registry) writePB(w io.Writer, writeEncoded encoder) (int, error) {
 	var metricHashes map[uint64]struct{}
 	if r.collectChecksEnabled {
 		metricHashes = make(map[uint64]struct{})
@@ -441,7 +444,7 @@ func (r *registry) writePB(encoder expfmt.Encoder) error {
 			// TODO: Consider different means of error reporting so
 			// that a single erroneous metric could be skipped
 			// instead of blowing up the whole collection.
-			return fmt.Errorf("error collecting metric %v: %s", desc, err)
+			return 0, fmt.Errorf("error collecting metric %v: %s", desc, err)
 		}
 		switch {
 		case metricFamily.Type != nil:
@@ -457,11 +460,11 @@ func (r *registry) writePB(encoder expfmt.Encoder) error {
 		case dtoMetric.Histogram != nil:
 			metricFamily.Type = dto.MetricType_HISTOGRAM.Enum()
 		default:
-			return fmt.Errorf("empty metric collected: %s", dtoMetric)
+			return 0, fmt.Errorf("empty metric collected: %s", dtoMetric)
 		}
 		if r.collectChecksEnabled {
 			if err := r.checkConsistency(metricFamily, dtoMetric, desc, metricHashes); err != nil {
-				return err
+				return 0, err
 			}
 		}
 		metricFamily.Metric = append(metricFamily.Metric, dtoMetric)
@@ -475,7 +478,7 @@ func (r *registry) writePB(encoder expfmt.Encoder) error {
 				if r.collectChecksEnabled {
 					for _, m := range mf.Metric {
 						if err := r.checkConsistency(mf, m, nil, metricHashes); err != nil {
-							return err
+							return 0, err
 						}
 					}
 				}
@@ -484,7 +487,7 @@ func (r *registry) writePB(encoder expfmt.Encoder) error {
 			for _, m := range mf.Metric {
 				if r.collectChecksEnabled {
 					if err := r.checkConsistency(existingMF, m, nil, metricHashes); err != nil {
-						return err
+						return 0, err
 					}
 				}
 				existingMF.Metric = append(existingMF.Metric, m)
@@ -505,12 +508,15 @@ func (r *registry) writePB(encoder expfmt.Encoder) error {
 	}
 	sort.Strings(names)
 
+	var written int
 	for _, name := range names {
-		if err := encoder.Encode(metricFamiliesByName[name]); err != nil {
-			return err
+		w, err := writeEncoded(w, metricFamiliesByName[name])
+		written += w
+		if err != nil {
+			return written, err
 		}
 	}
-	return nil
+	return written, nil
 }
 
 func (r *registry) checkConsistency(metricFamily *dto.MetricFamily, dtoMetric *dto.Metric, desc *Desc, metricHashes map[uint64]struct{}) error {
@@ -531,7 +537,7 @@ func (r *registry) checkConsistency(metricFamily *dto.MetricFamily, dtoMetric *d
 	h := fnv.New64a()
 	var buf bytes.Buffer
 	buf.WriteString(metricFamily.GetName())
-	buf.WriteByte(separatorByte)
+	buf.WriteByte(model.SeparatorByte)
 	h.Write(buf.Bytes())
 	// Make sure label pairs are sorted. We depend on it for the consistency
 	// check. Label pairs must be sorted by contract. But the point of this
@@ -541,7 +547,7 @@ func (r *registry) checkConsistency(metricFamily *dto.MetricFamily, dtoMetric *d
 	for _, lp := range dtoMetric.Label {
 		buf.Reset()
 		buf.WriteString(lp.GetValue())
-		buf.WriteByte(separatorByte)
+		buf.WriteByte(model.SeparatorByte)
 		h.Write(buf.Bytes())
 	}
 	metricHash := h.Sum64()
@@ -678,6 +684,34 @@ func newDefaultRegistry() *registry {
 	r.Register(NewProcessCollector(os.Getpid(), ""))
 	r.Register(NewGoCollector())
 	return r
+}
+
+func chooseEncoder(req *http.Request) (encoder, string) {
+	accepts := goautoneg.ParseAccept(req.Header.Get(acceptHeader))
+	for _, accept := range accepts {
+		switch {
+		case accept.Type == "application" &&
+			accept.SubType == "vnd.google.protobuf" &&
+			accept.Params["proto"] == "io.prometheus.client.MetricFamily":
+			switch accept.Params["encoding"] {
+			case "delimited":
+				return text.WriteProtoDelimited, DelimitedTelemetryContentType
+			case "text":
+				return text.WriteProtoText, ProtoTextTelemetryContentType
+			case "compact-text":
+				return text.WriteProtoCompactText, ProtoCompactTextTelemetryContentType
+			default:
+				continue
+			}
+		case accept.Type == "text" &&
+			accept.SubType == "plain" &&
+			(accept.Params["version"] == "0.0.4" || accept.Params["version"] == ""):
+			return text.MetricFamilyToText, TextTelemetryContentType
+		default:
+			continue
+		}
+	}
+	return text.MetricFamilyToText, TextTelemetryContentType
 }
 
 // decorateWriter wraps a writer to handle gzip compression if requested.  It

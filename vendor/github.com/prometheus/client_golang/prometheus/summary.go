@@ -25,11 +25,9 @@ import (
 	"github.com/golang/protobuf/proto"
 
 	dto "github.com/prometheus/client_model/go"
-)
 
-// quantileLabel is used for the label that defines the quantile in a
-// summary.
-const quantileLabel = "quantile"
+	"github.com/prometheus/client_golang/model"
+)
 
 // A Summary captures individual observations from an event or sample stream and
 // summarizes them in a manner similar to traditional summary statistics: 1. sum
@@ -59,7 +57,7 @@ var (
 	DefObjectives = map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001}
 
 	errQuantileLabelNotAllowed = fmt.Errorf(
-		"%q is not allowed as label name in summaries", quantileLabel,
+		"%q is not allowed as label name in summaries", model.QuantileLabel,
 	)
 )
 
@@ -114,9 +112,7 @@ type SummaryOpts struct {
 	ConstLabels Labels
 
 	// Objectives defines the quantile rank estimates with their respective
-	// absolute error. If Objectives[q] = e, then the value reported
-	// for q will be the φ-quantile value for some φ between q-e and q+e.
-	// The default value is DefObjectives.
+	// absolute error. The default value is DefObjectives.
 	Objectives map[float64]float64
 
 	// MaxAge defines the duration for which an observation stays relevant
@@ -174,12 +170,12 @@ func newSummary(desc *Desc, opts SummaryOpts, labelValues ...string) Summary {
 	}
 
 	for _, n := range desc.variableLabels {
-		if n == quantileLabel {
+		if n == model.QuantileLabel {
 			panic(errQuantileLabelNotAllowed)
 		}
 	}
 	for _, lp := range desc.constLabelPairs {
-		if lp.GetName() == quantileLabel {
+		if lp.GetName() == model.QuantileLabel {
 			panic(errQuantileLabelNotAllowed)
 		}
 	}
