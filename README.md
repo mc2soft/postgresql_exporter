@@ -54,7 +54,7 @@ Exporter will send following stats to prometheus
 * `deadlocks`       - Number of deadlocks detected in this database
 * `temp_files`      - Number of temporary files created by queries in this database
 * `temp_bytes`      - Total amount of data written to temporary files by queries in this database
-* `db_size`         - Database size
+* `size_bytes`      - Database size
 * `cache_hit_ratio` - Database cache hit ratio
 
 ### Tables
