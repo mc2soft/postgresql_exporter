@@ -4,9 +4,8 @@ import (
 	"io/ioutil"
 	"os"
 
-	"gopkg.in/yaml.v2"
-
 	"github.com/prometheus/log"
+	"gopkg.in/yaml.v2"
 
 	"github.com/mc2soft/postgresql_exporter/metrics"
 )
