@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -11,12 +12,12 @@ import (
 type SlowQueryMetrics struct {
 	mutex        sync.Mutex
 	metrics      map[string]prometheus.Gauge
-	milliseconds int
+	milliseconds int64
 }
 
-func NewSlowQueryMetrics(msToConsiderSlow int) *SlowQueryMetrics {
+func NewSlowQueryMetrics(durationToConsiderSlow time.Duration) *SlowQueryMetrics {
 	return &SlowQueryMetrics{
-		milliseconds: msToConsiderSlow,
+		milliseconds: durationToConsiderSlow.Nanoseconds() / 1000000,
 		metrics: map[string]prometheus.Gauge{
 			"slow_queries": prometheus.NewGauge(prometheus.GaugeOpts{
 				Namespace: namespace,

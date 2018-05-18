@@ -27,7 +27,7 @@ var (
 	listenAddress = flag.String("web.listen-address", ":9104", "Address to listen on for web interface and telemetry.")
 	metricPath    = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
 	databases     = flag.String("db.names", "", "Comma-separated list of monitored DB.")
-	slow          = flag.Int("db.consider-query-slow", 100, "Queries with execution time higher than this value will be considered as slow (in miliseconds).")
+	slow          = flag.Duration("db.consider-query-slow", 100*time.Millisecond, "Queries with execution time higher than this value will be considered as slow (e.g. 100ms, 1s).")
 	tables        = flag.String("db.tables", "", "Comma-separated list of tables to track.")
 	queries       = flag.String("queries.config-path", "", "Path to yaml files with custom queries")
 )
