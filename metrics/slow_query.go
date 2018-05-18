@@ -16,8 +16,9 @@ type SlowQueryMetrics struct {
 }
 
 func NewSlowQueryMetrics(durationToConsiderSlow time.Duration) *SlowQueryMetrics {
+
 	return &SlowQueryMetrics{
-		milliseconds: durationToConsiderSlow.Nanoseconds() / int64(time.Millisecond),
+		milliseconds: int64(durationToConsiderSlow / time.Millisecond),
 		metrics: map[string]prometheus.Gauge{
 			"slow_queries": prometheus.NewGauge(prometheus.GaugeOpts{
 				Namespace: namespace,
