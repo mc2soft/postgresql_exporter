@@ -4,19 +4,21 @@ import (
 	"database/sql"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 type SlowQueryMetrics struct {
-	mutex   sync.Mutex
-	metrics map[string]prometheus.Gauge
-	seconds int
+	mutex        sync.Mutex
+	metrics      map[string]prometheus.Gauge
+	milliseconds int64
 }
 
-func NewSlowQueryMetrics(secondsToConsiderSlow int) *SlowQueryMetrics {
+func NewSlowQueryMetrics(durationToConsiderSlow time.Duration) *SlowQueryMetrics {
+
 	return &SlowQueryMetrics{
-		seconds: secondsToConsiderSlow,
+		milliseconds: int64(durationToConsiderSlow / time.Millisecond),
 		metrics: map[string]prometheus.Gauge{
 			"slow_queries": prometheus.NewGauge(prometheus.GaugeOpts{
 				Namespace: namespace,
@@ -42,22 +44,42 @@ func (s *SlowQueryMetrics) Scrape(db *sql.DB) error {
 	defer s.mutex.Unlock()
 
 	count := new(float64)
-	err := db.QueryRow("SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND NOW() - query_start > ($1 || ' sec')::interval", s.seconds).Scan(count)
+	err := db.QueryRow(
+		`SELECT count(*) 
+				FROM pg_stat_activity 
+				WHERE state = 'active' AND 
+				NOW() - query_start > ($1 || ' milliseconds')::interval`,
+		s.milliseconds).Scan(count)
 	if err != nil {
 		return errors.New("error counting slow queries: " + err.Error())
 	}
+
 	s.metrics["slow_queries"].Set(*count)
 
-	err = db.QueryRow("SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND NOW() - query_start > ($1 || ' sec')::interval AND query ilike 'select%'", s.seconds).Scan(count)
+	err = db.QueryRow(
+		`SELECT count(*) 
+				FROM pg_stat_activity 
+				WHERE state = 'active' AND 
+				NOW() - query_start > ($1 || ' milliseconds' )::interval AND 
+				query ilike 'select%'`,
+		s.milliseconds).Scan(count)
 	if err != nil {
 		return errors.New("error counting slow select queries: " + err.Error())
 	}
+
 	s.metrics["slow_select_queries"].Set(*count)
 
-	err = db.QueryRow("SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND NOW() - query_start > ($1 || ' sec')::interval AND (query ilike 'insert%' OR query ilike 'update%' OR query ilike 'delete%')", s.seconds).Scan(count)
+	err = db.QueryRow(
+		`SELECT count(*) 
+				FROM pg_stat_activity 
+				WHERE state = 'active' AND 
+				NOW() - query_start > ($1 || ' milliseconds')::interval AND 
+				(query ilike 'insert%' OR query ilike 'update%' OR query ilike 'delete%')`,
+		s.milliseconds).Scan(count)
 	if err != nil {
 		return errors.New("error counting slow dml queries: " + err.Error())
 	}
+
 	s.metrics["slow_dml_queries"].Set(*count)
 
 	return nil
