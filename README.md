@@ -84,7 +84,7 @@ You need latest version of go to build.
 
 
 Since we do not want to use superuser for monitoring, we need to create a separate user for it. 
-It has no access to query deails in pg_catalog.pg_stat_activity table. 
+It has no access to query details in pg_catalog.pg_stat_activity table. 
 So you need also prepare SQL function in order to make work queries for slow-log if your [PostgreSQL version is less than 10+](https://www.postgresql.org/docs/10/static/default-roles.html). 
 If your PostgreSQL version is 10+, you should use role `pg_read_all_stats` and use pg_catalog.pg_stat_activity table right without function and view (see below).     
 The function created by `postgres` user for your monitoring user, so monitoring user must use postgres database since `pq: cross-database references are not implemented:` error raised if you use another database for monitoring purposes. 
