@@ -103,11 +103,12 @@ BEGIN
 END;
 $BODY$ LANGUAGE plpgsql SECURITY DEFINER;
 
-
+CREATE GROUP monitoring;
 CREATE USER monitoring LOGIN NOSUPERUSER;
+ALTER GROUP monitoring ADD USER monitoring;
 CREATE SCHEMA monitoring;
-GRANT USAGE ON SCHEMA monitoring TO monitoring; 
+GRANT USAGE ON SCHEMA monitoring TO GROUP monitoring;
 CREATE VIEW monitoring.pg_stat_activity AS SELECT * FROM public.pg_stat_activity();
-GRANT SELECT ON monitoring.pg_stat_activity TO monitoring;
+GRANT SELECT ON monitoring.pg_stat_activity TO GROUP monitoring;
 ALTER ROLE monitoring SET search_path = monitoring, pg_catalog,"$user", public;
 ```
