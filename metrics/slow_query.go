@@ -43,44 +43,41 @@ func (s *SlowQueryMetrics) Scrape(db *sql.DB) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	count := new(float64)
+	var count float64
 	err := db.QueryRow(
 		`SELECT count(*) 
-				FROM pg_stat_activity 
+				FROM monitoring.pg_stat_activity 
 				WHERE state = 'active' AND 
 				NOW() - query_start > ($1 || ' milliseconds')::interval`,
-		s.milliseconds).Scan(count)
+		s.milliseconds).Scan(&count)
 	if err != nil {
 		return errors.New("error counting slow queries: " + err.Error())
 	}
-
-	s.metrics["slow_queries"].Set(*count)
+	s.metrics["slow_queries"].Set(count)
 
 	err = db.QueryRow(
 		`SELECT count(*) 
-				FROM pg_stat_activity 
+				FROM monitoring.pg_stat_activity 
 				WHERE state = 'active' AND 
 				NOW() - query_start > ($1 || ' milliseconds' )::interval AND 
 				query ilike 'select%'`,
-		s.milliseconds).Scan(count)
+		s.milliseconds).Scan(&count)
 	if err != nil {
 		return errors.New("error counting slow select queries: " + err.Error())
 	}
-
-	s.metrics["slow_select_queries"].Set(*count)
+	s.metrics["slow_select_queries"].Set(count)
 
 	err = db.QueryRow(
 		`SELECT count(*) 
-				FROM pg_stat_activity 
+				FROM monitoring.pg_stat_activity 
 				WHERE state = 'active' AND 
 				NOW() - query_start > ($1 || ' milliseconds')::interval AND 
 				(query ilike 'insert%' OR query ilike 'update%' OR query ilike 'delete%')`,
-		s.milliseconds).Scan(count)
+		s.milliseconds).Scan(&count)
 	if err != nil {
 		return errors.New("error counting slow dml queries: " + err.Error())
 	}
-
-	s.metrics["slow_dml_queries"].Set(*count)
+	s.metrics["slow_dml_queries"].Set(count)
 
 	return nil
 }

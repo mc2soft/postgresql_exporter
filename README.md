@@ -1,15 +1,7 @@
 # PostgreSQL Server Exporter [![Build Status](https://travis-ci.org/mc2soft/postgresql_exporter.svg)](https://travis-ci.org/mc2soft/postgresql_exporter)
 
-Prometheus exporter for PostgreSQL server metrics. Supported PostgreSQL versions: 9.0 and up.
+Prometheus exporter for PostgreSQL server metrics. Supported PostgreSQL versions: 9.0 and up to 10th.
 
-
-## Build and run
-
-You need latest version of go to build.
-
-    go build
-    export DATA_SOURCE_NAME='user=username dbname=database password=password sslmode=disable'
-    ./postgresql_exporter <flags>
 
 ### Flags
 
@@ -81,3 +73,42 @@ Exporter will send following stats to prometheus
 * `slow_select_queries` - Number of slow SELECT queries
 * `slow_dml_queries`    - Number of slow data manipulation queries (INSERT, UPDATE, DELETE)
 
+
+## Build and run
+
+You need latest version of go to build.
+
+    go build
+    export DATA_SOURCE_NAME='user=username dbname=database password=password sslmode=disable'
+    ./postgresql_exporter <flags>
+
+
+Since we do not want to use superuser for monitoring, we need to create a separate user for it. 
+It has no access to query details in pg_catalog.pg_stat_activity table. 
+So you need also prepare SQL function in order to make work queries for slow-log if your [PostgreSQL version is less than 10+](https://www.postgresql.org/docs/10/static/default-roles.html). 
+If your PostgreSQL version is 10+, you should use role `pg_read_all_stats` and use pg_catalog.pg_stat_activity table right without function and view (see below).     
+The function created by `postgres` user for your monitoring user, so monitoring user must use postgres database since `pq: cross-database references are not implemented:` error raised if you use another database for monitoring purposes. 
+here is the function itself and setup: 
+```
+CREATE OR REPLACE FUNCTION public.pg_stat_activity() RETURNS SETOF pg_catalog.pg_stat_activity
+AS $BODY$
+DECLARE
+ rec RECORD;
+BEGIN
+    FOR rec IN SELECT * FROM pg_catalog.pg_stat_activity
+    LOOP
+        RETURN NEXT rec;
+    END LOOP;
+    RETURN;
+END;
+$BODY$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE GROUP monitoring;
+CREATE USER monitoring LOGIN NOSUPERUSER;
+ALTER GROUP monitoring ADD USER monitoring;
+CREATE SCHEMA monitoring;
+GRANT USAGE ON SCHEMA monitoring TO GROUP monitoring;
+CREATE VIEW monitoring.pg_stat_activity AS SELECT * FROM public.pg_stat_activity();
+GRANT SELECT ON monitoring.pg_stat_activity TO GROUP monitoring;
+ALTER ROLE monitoring SET search_path = monitoring, pg_catalog,"$user", public;
+```
